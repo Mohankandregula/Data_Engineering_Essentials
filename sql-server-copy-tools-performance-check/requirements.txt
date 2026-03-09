@@ -1,0 +1,15 @@
+pyodbc
+pymssql
+sqlalchemy>=2.0
+pandas
+numpy
+bcpandas
+richbench
+python-dotenv
+matplotlib
+seaborn
+jupyter
+tabulate
+mssql-python
+turbodbc
+arrowsqlbcpy

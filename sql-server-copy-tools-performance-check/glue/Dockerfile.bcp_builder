@@ -1,0 +1,53 @@
+# Dockerfile to build bcp and its ODBC dependencies, and package them for use in AWS Glue 5.0 jobs.
+#
+# Glue 5.0 runs Amazon Linux 2023 (glibc 2.34) so the base image must match.
+# If you build on the wrong OS the bcp binary will crash at runtime with
+# "version GLIBC_X.XX not found" — I hit this building on AL2 first.
+#
+# For Glue 4.0 (Amazon Linux 2, glibc 2.26):
+#   change FROM to amazonlinux:2, use rhel/7 repo, yum instead of dnf
+#
+# Build:  docker build -f Dockerfile.bcp_builder -t bcp-builder .
+# Extract: docker run --rm -v $(pwd)/output:/output bcp-builder
+
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+
+RUN dnf update -y -q && \
+    curl -s https://packages.microsoft.com/config/rhel/9/prod.repo \
+        -o /etc/yum.repos.d/mssql-release.repo && \
+    ACCEPT_EULA=Y dnf install -y mssql-tools18 unixODBC zip && \
+    dnf clean all && \
+    # mirror the original install layout so bcp can find its resource DLLs
+    # bcp looks for them at ../share/resources/en_US/ relative to the binary
+    mkdir -p /bcp_package/bin \
+             /bcp_package/share/resources/en_US \
+             /bcp_package/lib \
+             /build && \
+    # binaries
+    cp /opt/mssql-tools18/bin/bcp    /bcp_package/bin/ && \
+    cp /opt/mssql-tools18/bin/sqlcmd /bcp_package/bin/ && \
+    # bcp/sqlcmd locale files — must be at share/resources/en_US/ (not bin/en_US/)
+    cp -r /opt/mssql-tools18/share/resources/en_US/* /bcp_package/share/resources/en_US/ && \
+    # shared libs (AL2023 minimal doesn't have findutils, so use globs)
+    cp /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-*.so.* /bcp_package/lib/ && \
+    cp /usr/lib64/libodbc.so.2.0.0     /bcp_package/lib/ && \
+    cp /usr/lib64/libodbcinst.so.2.0.0 /bcp_package/lib/ && \
+    # ODBC driver resource file (note: it's msodbcsqlr18, with an 'r')
+    # needs to be at share/resources/en_US/ — the driver looks for it at
+    # ../share/resources/en_US/ relative to its own .so in lib/
+    cp /opt/microsoft/msodbcsql18/share/resources/en_US/msodbcsqlr18.rll \
+       /bcp_package/share/resources/en_US/ && \
+    # soname symlinks
+    cd /bcp_package/lib && \
+    ln -sf libodbc.so.2.0.0     libodbc.so.2 && \
+    ln -sf libodbcinst.so.2.0.0 libodbcinst.so.2 && \
+    # odbc config — paths assume we unpack to /tmp/bcp/ on the Glue worker
+    BCP_DRIVER=$(cd /bcp_package/lib && ls libmsodbcsql-*.so.*) && \
+    printf "[ODBC Driver 18 for SQL Server]\nDescription=MS ODBC 18\nDriver=/tmp/bcp/lib/%s\n" \
+        "$BCP_DRIVER" > /bcp_package/odbcinst.ini && \
+    cd /bcp_package && zip -r /build/bcp_package.zip . && \
+    echo "--- contents ---" && unzip -l /build/bcp_package.zip && \
+    echo "--- glibc ---" && ldd --version | head -1
+
+# volume mount goes to /output, so CMD copies from /build to the mount
+CMD cp /build/bcp_package.zip /output/ && echo "bcp_package.zip extracted to /output/"
