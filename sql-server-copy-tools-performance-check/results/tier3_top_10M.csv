@@ -1,0 +1,5 @@
+method,rows,min_sec,max_sec,mean_sec,median_sec,stdev_sec,rows_per_sec
+tvp_pyodbc,10000000,,,,,,
+bulk_insert_tsql,10000000,265.0333499000408,329.37967970001046,297.2065148000256,297.2065148000256,45.49972614602458,33646.63795047853
+bcp_cli,10000000,,,,,,
+arrowsqlbcpy,10000000,,,,,,
